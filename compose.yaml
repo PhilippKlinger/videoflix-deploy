@@ -5,7 +5,7 @@ name: videoflix
 
 x-backend: &backend
   # Change the digests here to roll out a new version; the previous commit is the rollback.
-  image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:916115b336cd6f99e864aadcfd6a9234dfb5e0707ba159730f3fa4eb6f6b6831}
+  image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:1a9e7e7764bfde1fe4ae9bc75a30b590af0f03e602f355a343a9b4eaf07b589a}
   env_file: [.env]
   volumes:
     - media:/app/media
