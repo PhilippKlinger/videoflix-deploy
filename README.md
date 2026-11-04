@@ -28,6 +28,9 @@ Sample catalog (folder with .mp4 files copied to `/srv/videoflix/import`):
 ```bash
 docker compose cp import/. web:/tmp/import
 docker compose exec web python manage.py import_catalog /tmp/import
+# Containers drop all capabilities, so not even root may delete the copy;
+# recreating web discards it (the imported videos live in the media volume)
+docker compose up -d --force-recreate web
 docker compose logs -f worker              # conversions run one after another
 ```
 
