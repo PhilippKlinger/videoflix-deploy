@@ -1,0 +1,107 @@
+# Videoflix production stack. Starts only published images pinned by digest: no build, no source mounts.
+# One commit in this repository = one running combination of backend and frontend.
+# TLS and routing: vps-edge (Caddy) reaches web and frontend over the external network "edge".
+name: videoflix
+
+x-backend: &backend
+  # Change the digests here to roll out a new version; the previous commit is the rollback.
+  image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:916115b336cd6f99e864aadcfd6a9234dfb5e0707ba159730f3fa4eb6f6b6831}
+  env_file: [.env]
+  volumes:
+    - media:/app/media
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:18.6-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
+    environment:
+      POSTGRES_DB: ${DB_NAME:?Set DB_NAME in .env}
+      POSTGRES_USER: ${DB_USER:?Set DB_USER in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      # Postgres 18 keeps its data below /var/lib/postgresql/18
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks: [internal]
+
+  redis:
+    # Cache, rate limits and job queue; nothing here needs to survive a restart
+    image: redis:8.10.3-alpine@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks: [internal]
+
+  web:
+    <<: *backend
+    command: ["web"]
+    healthcheck:
+      # Django only answers hosts from ALLOWED_HOSTS; /api/health/ is exempt from the HTTPS redirect
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.request as r; h = os.environ['ALLOWED_HOSTS'].split(',')[0]; r.urlopen(r.Request('http://127.0.0.1:8000/api/health/', headers={'Host': h}), timeout=4)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      internal:
+      edge:
+        aliases: [videoflix-web]
+
+  worker:
+    # Exactly one worker: ffmpeg conversions run one after another
+    <<: *backend
+    command: ["worker"]
+    depends_on:
+      web:
+        condition: service_healthy
+    networks: [internal]
+
+  demo-cleanup:
+    # Deletes expired demo accounts and their videos every 10 minutes (login checks expiry as well)
+    <<: *backend
+    command: ["sh", "-c", "while true; do python manage.py delete_expired_demos; sleep 600; done"]
+    depends_on:
+      web:
+        condition: service_healthy
+    networks: [internal]
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?Set FRONTEND_IMAGE (ghcr.io/philippklinger/videoflix-frontend@sha256:...)}
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    networks:
+      edge:
+        aliases: [videoflix-frontend]
+
+networks:
+  # Database and Redis have no route to the outside
+  internal:
+    internal: true
+  edge:
+    external: true
+
+volumes:
+  db_data:
+  media:

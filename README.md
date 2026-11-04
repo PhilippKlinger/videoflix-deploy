@@ -4,15 +4,38 @@ Deployment configuration for [Videoflix](https://github.com/PhilippKlinger/video
 
 The application repositories ([backend](https://github.com/PhilippKlinger/videoflix-backend), [frontend](https://github.com/PhilippKlinger/videoflix-frontend)) only build and push images to GHCR. This repository pins those images by digest and rolls them out to the VPS, so one commit equals one running combination.
 
-## Planned contents
+## Contents
 
-- `compose.yaml`: backend (`web`, `worker`), frontend, Postgres, Redis; images pinned by digest, healthchecks, internal network plus the shared `edge` network
-- Deploy workflow (GitHub Environment `production`): pull, `up --no-build`, smoke test
-- Backup and restore of the database and the public media catalog
-- Runbook: deploy, rollback (previous digest), restore
+- `compose.yaml`: `web` (Gunicorn) and `worker` (RQ, ffmpeg) from the backend image, `demo-cleanup` (expired demo accounts every 10 minutes), `frontend` (nginx), Postgres 18 and Redis 8; all images pinned by digest, healthchecks, `depends_on` with conditions, dropped capabilities
+- Networks: `internal` (no route outside, database and Redis) and the shared `edge` network of [vps-edge](https://github.com/PhilippKlinger/vps-edge) with the aliases `videoflix-web` and `videoflix-frontend`; no service publishes ports
+- `.env.example`: every variable with purpose and whether it is required
 
 TLS and routing are handled by [vps-edge](https://github.com/PhilippKlinger/vps-edge).
 
-## Status
+## First start on the server
 
-Repository set up, contents follow.
+```bash
+cd /srv/videoflix
+cp .env.example .env && chmod 600 .env    # fill in the required values
+docker compose pull
+docker compose up -d
+docker compose ps                          # web healthy, frontend healthy
+docker compose exec web python manage.py createsuperuser
+```
+
+Sample catalog (folder with .mp4 files copied to `/srv/videoflix/import`):
+
+```bash
+docker compose cp import/. web:/tmp/import
+docker compose exec web python manage.py import_catalog /tmp/import
+docker compose logs -f worker              # conversions run one after another
+```
+
+## Update and rollback
+
+Change the image digests in `compose.yaml`, commit, then on the server `git pull && docker compose pull && docker compose up -d`. Rollback: check out the previous commit and run the same commands.
+
+## Planned
+
+- Deploy workflow (GitHub Environment `production`) with smoke test
+- Backup and restore of the database and the media catalog, runbook
