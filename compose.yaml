@@ -5,7 +5,7 @@ name: videoflix
 
 x-backend: &backend
   # Change the digests here to roll out a new version; the previous commit is the rollback.
-  image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:1a9e7e7764bfde1fe4ae9bc75a30b590af0f03e602f355a343a9b4eaf07b589a}
+  image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:74968432296c0f32ad43ddb595fb78f2827f133817f15927fedb39fcff2576a4}
   env_file: [.env]
   volumes:
     - media:/app/media
@@ -87,7 +87,7 @@ services:
     networks: [internal]
 
   frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/philippklinger/videoflix-frontend@sha256:68532c9ad740a9f9b0a571e3c4ca4f64526629a760f89fb57d84a43fb2dffaa3}
+    image: ${FRONTEND_IMAGE:-ghcr.io/philippklinger/videoflix-frontend@sha256:47cd1c373fdcb12a4b848fda8191806c12b5e4ede499a05c93c1cb06fbd8d4ec}
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
