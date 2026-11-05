@@ -6,8 +6,8 @@ The application repositories ([backend](https://github.com/PhilippKlinger/videof
 
 ## Contents
 
-- `compose.yaml`: `web` (Gunicorn) and `worker` (RQ, ffmpeg) from the backend image, `demo-cleanup` (expired demo accounts every 10 minutes), `frontend` (nginx), Postgres 18 and Redis 8; all images pinned by digest, healthchecks, `depends_on` with conditions, dropped capabilities
-- Networks: `internal` (no route outside, database and Redis) and the shared `edge` network of [vps-edge](https://github.com/PhilippKlinger/vps-edge) with the aliases `videoflix-web` and `videoflix-frontend`; no service publishes ports
+- `compose.yaml`: `web` (Gunicorn), `worker` (RQ, ffmpeg) and `mail-worker` (RQ, account mails) from the backend image, `demo-cleanup` (expired demo accounts every 10 minutes), `frontend` (nginx), Postgres 18 and Redis 8; all images pinned by digest, healthchecks, `depends_on` with conditions, dropped capabilities
+- Networks: `internal` (no route outside, database and Redis), `outbound` (SMTP for `mail-worker` only) and the shared `edge` network of [vps-edge](https://github.com/PhilippKlinger/vps-edge) with the aliases `videoflix-web` and `videoflix-frontend`; no service publishes ports
 - `.env.example`: every variable with purpose and whether it is required
 - `.github/workflows/deploy.yml`, `scripts/`: deploy with smoke test and automatic rollback
 - `backup/`: backup and restore test scripts, systemd service and timer
@@ -54,7 +54,7 @@ Secrets of the Environment: `SSH_HOST`, `SSH_PORT`, `SSH_USER`, `SSH_PRIVATE_KEY
 
 **Roll back by hand:** Actions → Deploy → Run workflow, choose the service and enter an earlier digest (the deploy summaries and the history of `compose.yaml` list them). Run this for one service at a time.
 
-**Limits of a rollback:** the backend applies migrations at startup and they are not reverted, so an older backend image must still work with the newer schema. Recreating the worker interrupts a running conversion.
+**Limits of a rollback:** the backend applies migrations at startup and they are not reverted, so an older backend image must still work with the newer schema. An image without the `mail-worker` command only runs together with a `compose.yaml` from before that service. Recreating the worker interrupts a running conversion.
 
 **Without the workflow:** on the server `docker compose pull && docker compose up -d`; `compose.override.yaml` applies to manual commands as well. Delete that file to go back to the digests in `compose.yaml`.
 
@@ -89,7 +89,7 @@ Real restore as user deploy, `sudo -iu deploy` (overwrites the live data, the si
 
 ```bash
 cd /srv/videoflix
-docker compose stop web worker demo-cleanup
+docker compose stop web worker mail-worker demo-cleanup
 docker compose exec -T db sh -c 'dropdb -U "$POSTGRES_USER" "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
 docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' < /srv/backups/videoflix/db-<time>.dump
 docker compose run --rm -T --no-deps web tar -xf - -C /app/media < /srv/backups/videoflix/media-<time>.tar
