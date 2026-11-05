@@ -3,6 +3,11 @@
 # TLS and routing: vps-edge (Caddy) reaches web and frontend over the external network "edge".
 name: videoflix
 
+# journald, because json-file only rotates by size: the 14-day limit in the privacy policy needs a time limit.
+# Retention is set on the host, see vps-edge (host/journald-retention.conf).
+x-logging: &logging
+  driver: journald
+
 x-backend: &backend
   # Last digest that passed the deploy workflow; the server may be ahead via compose.override.yaml until the pin PR is merged.
   image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:74968432296c0f32ad43ddb595fb78f2827f133817f15927fedb39fcff2576a4}
@@ -12,6 +17,7 @@ x-backend: &backend
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
   restart: unless-stopped
+  logging: *logging
 
 services:
   db:
@@ -30,6 +36,7 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
+    logging: *logging
     networks: [internal]
 
   redis:
@@ -42,6 +49,7 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    logging: *logging
     networks: [internal]
 
   web:
@@ -91,6 +99,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
+    logging: *logging
     networks:
       edge:
         aliases: [videoflix-frontend]
