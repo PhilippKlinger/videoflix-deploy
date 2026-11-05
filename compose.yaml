@@ -9,7 +9,7 @@ x-logging: &logging
   driver: journald
 
 x-backend: &backend
-  # Change the digests here to roll out a new version; the previous commit is the rollback.
+  # Last digest that passed the deploy workflow; the server may be ahead via compose.override.yaml until the pin PR is merged.
   image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:74968432296c0f32ad43ddb595fb78f2827f133817f15927fedb39fcff2576a4}
   env_file: [.env]
   volumes:

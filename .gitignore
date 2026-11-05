@@ -1,2 +1,4 @@
 .env
 import/
+compose.override.yaml
+.deploy-previous

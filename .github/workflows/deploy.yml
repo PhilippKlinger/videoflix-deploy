@@ -1,0 +1,185 @@
+# Rolls one image out to the VPS, checks it from the outside and goes back on failure.
+# Triggers:
+#   repository_dispatch "image-published": sent by the backend and frontend CI after a push to GHCR
+#   workflow_dispatch: manual deploy or rollback to any digest
+#
+# Environment "production", secrets: SSH_HOST, SSH_PORT, SSH_USER, SSH_PRIVATE_KEY, SSH_KNOWN_HOSTS
+# The server keeps its own .env; secrets are never copied by CI.
+name: Deploy
+
+on:
+  repository_dispatch:
+    types: [image-published]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Image to deploy
+        required: true
+        type: choice
+        options: [backend, frontend]
+      digest:
+        description: Image digest (sha256:...)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Never run two deploys at the same time and never cancel one halfway
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  BASE_URL: https://videoflix.philipp-klinger.com
+
+jobs:
+  deploy:
+    name: Deploy and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    outputs:
+      service: ${{ steps.request.outputs.service }}
+      digest: ${{ steps.request.outputs.digest }}
+    steps:
+      - name: Check out scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The payload comes from outside: only pass it on through env and only after this check
+      - name: Validate request
+        id: request
+        env:
+          SERVICE: ${{ github.event.client_payload.service || inputs.service }}
+          DIGEST: ${{ github.event.client_payload.digest || inputs.digest }}
+        run: |
+          set -Eeuo pipefail
+          [[ "${SERVICE}" =~ ^(backend|frontend)$ ]] || { echo "::error::Unknown service."; exit 1; }
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::Digest has an invalid format."; exit 1; }
+          echo "service=${SERVICE}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure SSH client
+        id: ssh
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          for NAME in SSH_HOST SSH_PORT SSH_USER SSH_PRIVATE_KEY SSH_KNOWN_HOSTS; do
+            [[ -n "${!NAME:-}" ]] || { echo "::error::Required secret ${NAME} is missing or empty."; exit 1; }
+          done
+
+          SSH_DIR="${RUNNER_TEMP}/deploy-ssh"
+          echo "SSH_DIR=${SSH_DIR}" >> "${GITHUB_ENV}"
+          umask 077
+          install -m 700 -d "${SSH_DIR}"
+          printf '%s\n' "${SSH_PRIVATE_KEY}" > "${SSH_DIR}/key"
+          printf '%s\n' "${SSH_KNOWN_HOSTS}" > "${SSH_DIR}/known_hosts"
+          printf '%s\n' \
+            'Host target' \
+            "  HostName ${SSH_HOST}" \
+            "  Port ${SSH_PORT}" \
+            "  User ${SSH_USER}" \
+            "  IdentityFile ${SSH_DIR}/key" \
+            "  UserKnownHostsFile ${SSH_DIR}/known_hosts" \
+            '  StrictHostKeyChecking yes' \
+            '  BatchMode yes' \
+            '  IdentitiesOnly yes' \
+            '  PasswordAuthentication no' \
+            '  ConnectTimeout 10' \
+            '  LogLevel ERROR' > "${SSH_DIR}/config"
+
+      - name: Deploy image
+        id: deploy
+        env:
+          SERVICE: ${{ steps.request.outputs.service }}
+          DIGEST: ${{ steps.request.outputs.digest }}
+        run: ssh -F "${SSH_DIR}/config" target bash -s -- deploy "${SERVICE}" "${DIGEST}" < scripts/deploy.sh
+
+      - name: Smoke test
+        id: smoke
+        run: bash scripts/smoke-test.sh "${BASE_URL}"
+
+      - name: Clean up on the server
+        run: ssh -F "${SSH_DIR}/config" target bash -s -- finish < scripts/deploy.sh
+
+      # The job stays red: a failed deploy must not look like a success after the rollback
+      - name: Roll back to the previous images
+        if: >-
+          always() && steps.ssh.outcome == 'success' &&
+          (steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled' ||
+          steps.smoke.outcome == 'failure' || steps.smoke.outcome == 'cancelled')
+        run: |
+          set -Eeuo pipefail
+          echo "::error::Deploy or smoke test failed, rolling back."
+          ssh -F "${SSH_DIR}/config" target bash -s -- rollback < scripts/deploy.sh
+          bash scripts/smoke-test.sh "${BASE_URL}"
+
+      - name: Summary
+        if: always()
+        env:
+          SERVICE: ${{ steps.request.outputs.service }}
+          DIGEST: ${{ steps.request.outputs.digest }}
+          DEPLOY: ${{ steps.deploy.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
+        run: |
+          {
+            echo "### Deploy ${SERVICE:-unknown}"
+            echo "- Digest: \`${DIGEST:-none}\`"
+            echo "- Deploy: ${DEPLOY:-skipped}, smoke test: ${SMOKE:-skipped}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove SSH material
+        if: always()
+        run: rm -rf "${SSH_DIR:-${RUNNER_TEMP}/deploy-ssh}"
+
+  # compose.yaml stays the record of what runs: a green deploy proposes its digest as a PR.
+  # Own job, so the write token never sees the SSH secrets and vice versa.
+  pin:
+    name: Propose digest pin
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICE: ${{ needs.deploy.outputs.service }}
+          DIGEST: ${{ needs.deploy.outputs.digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -Eeuo pipefail
+          BRANCH="pin/${SERVICE}"
+          # Deleting the branch closes an older pin PR that this deploy replaces
+          git push --quiet origin --delete "${BRANCH}" 2> /dev/null || true
+
+          sed -i -E "s#(videoflix-${SERVICE}@)sha256:[0-9a-f]{64}#\1${DIGEST}#" compose.yaml
+          if git diff --quiet; then
+            echo "compose.yaml already pins this digest."
+            exit 0
+          fi
+
+          git switch --quiet -c "${BRANCH}"
+          git commit --quiet -am "chore(deploy): pin ${SERVICE} image to ${DIGEST:0:19}"
+          git push --quiet origin "${BRANCH}"
+          gh pr create --base main --head "${BRANCH}" \
+            --title "chore(deploy): pin ${SERVICE} image to ${DIGEST:0:19}" \
+            --body "Records the digest that passed the smoke test in ${RUN_URL}. It already runs in production; merging does not trigger a deploy."
