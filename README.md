@@ -9,6 +9,7 @@ The application repositories ([backend](https://github.com/PhilippKlinger/videof
 - `compose.yaml`: `web` (Gunicorn) and `worker` (RQ, ffmpeg) from the backend image, `demo-cleanup` (expired demo accounts every 10 minutes), `frontend` (nginx), Postgres 18 and Redis 8; all images pinned by digest, healthchecks, `depends_on` with conditions, dropped capabilities
 - Networks: `internal` (no route outside, database and Redis) and the shared `edge` network of [vps-edge](https://github.com/PhilippKlinger/vps-edge) with the aliases `videoflix-web` and `videoflix-frontend`; no service publishes ports
 - `.env.example`: every variable with purpose and whether it is required
+- `backup/`: backup and restore test scripts, systemd service and timer
 
 TLS and routing are handled by [vps-edge](https://github.com/PhilippKlinger/vps-edge).
 
@@ -34,6 +35,10 @@ docker compose up -d --force-recreate web
 docker compose logs -f worker              # conversions run one after another
 ```
 
+## Logs
+
+All services log to journald instead of `json-file`, because `json-file` can only rotate by size. The time limit of 14 days from the privacy policy is set on the host, see [vps-edge](https://github.com/PhilippKlinger/vps-edge). Reading logs stays the same: `docker compose logs`.
+
 ## Update and rollback
 
 Change the image digests in `compose.yaml`, commit, then on the server `git pull && docker compose pull && docker compose up -d`. Rollback: check out the previous commit and run the same commands.
@@ -41,4 +46,3 @@ Change the image digests in `compose.yaml`, commit, then on the server `git pull
 ## Planned
 
 - Deploy workflow (GitHub Environment `production`) with smoke test
-- Backup and restore of the database and the media catalog, runbook
