@@ -1,0 +1,10 @@
+# Copy to /etc/systemd/system/ together with the timer (see README).
+[Unit]
+Description=Videoflix backup (database, weekly media)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+ExecStart=/srv/videoflix/backup/backup.sh

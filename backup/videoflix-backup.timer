@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Videoflix backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+# Catch up after the server was down at that time
+Persistent=true
+
+[Install]
+WantedBy=timers.target
