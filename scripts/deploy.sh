@@ -21,19 +21,25 @@ running_image() {
   docker inspect -f '{{.Config.Image}}' "${id}"
 }
 
+# From compose.yaml alone: after a rollback the override must not bring back a service of a newer commit
+backend_services() {
+  docker compose -f compose.yaml config --services | grep -vxE 'db|redis|frontend'
+}
+
 write_override() {
-  cat > "${OVERRIDE_FILE}.tmp" <<YAML
-# Written by the deploy workflow, do not edit by hand.
-services:
-  web:
-    image: $1
-  worker:
-    image: $1
-  demo-cleanup:
-    image: $1
-  frontend:
-    image: $2
-YAML
+  local service
+  {
+    echo '# Written by the deploy workflow, do not edit by hand.'
+    echo 'services:'
+    for service in $(backend_services); do
+      printf '  %s:
+    image: %s
+' "${service}" "$1"
+    done
+    printf '  frontend:
+    image: %s
+' "$2"
+  } > "${OVERRIDE_FILE}.tmp"
   mv -f "${OVERRIDE_FILE}.tmp" "${OVERRIDE_FILE}"
 }
 
@@ -45,7 +51,7 @@ start_stack() {
 
 verify_running() {
   local service
-  for service in web worker demo-cleanup; do
+  for service in $(backend_services); do
     [[ "$(running_image "${service}")" == "$1" ]] || { echo "${service} does not run the approved image." >&2; return 1; }
   done
   [[ "$(running_image frontend)" == "$2" ]] || { echo "frontend does not run the approved image." >&2; return 1; }

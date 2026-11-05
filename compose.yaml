@@ -10,7 +10,7 @@ x-logging: &logging
 
 x-backend: &backend
   # Last digest that passed the deploy workflow; the server may be ahead via compose.override.yaml until the pin PR is merged.
-  image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:74968432296c0f32ad43ddb595fb78f2827f133817f15927fedb39fcff2576a4}
+  image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:be0e2b5ad7495435b8d26f7fec3943f9b7ad61f50dd0fe81e57389103c7412a8}
   env_file: [.env]
   volumes:
     - media:/app/media
@@ -85,6 +85,16 @@ services:
         condition: service_healthy
     networks: [internal]
 
+  mail-worker:
+    # Sends account mails: the only worker with a route outside, so ffmpeg stays without one
+    <<: *backend
+    command: ["mail-worker"]
+    volumes: []
+    depends_on:
+      web:
+        condition: service_healthy
+    networks: [internal, outbound]
+
   demo-cleanup:
     # Deletes expired demo accounts and their videos every 10 minutes (login checks expiry as well)
     <<: *backend
@@ -108,6 +118,8 @@ networks:
   # Database and Redis have no route to the outside
   internal:
     internal: true
+  # Route outside for SMTP, without access to the other stacks on "edge"
+  outbound:
   edge:
     external: true
 
