@@ -161,10 +161,10 @@ jobs:
           SERVICE: ${{ needs.deploy.outputs.service }}
           DIGEST: ${{ needs.deploy.outputs.digest }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          GIT_AUTHOR_NAME: Philipp Klinger
-          GIT_AUTHOR_EMAIL: 130332874+PhilippKlinger@users.noreply.github.com
-          GIT_COMMITTER_NAME: Philipp Klinger
-          GIT_COMMITTER_EMAIL: 130332874+PhilippKlinger@users.noreply.github.com
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           set -Eeuo pipefail
           BRANCH="pin/${SERVICE}"
