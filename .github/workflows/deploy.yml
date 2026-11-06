@@ -39,9 +39,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
-    outputs:
-      service: ${{ steps.request.outputs.service }}
-      digest: ${{ steps.request.outputs.digest }}
     steps:
       - name: Check out scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -158,8 +155,10 @@ jobs:
       - name: Open pull request
         env:
           GH_TOKEN: ${{ github.token }}
-          SERVICE: ${{ needs.deploy.outputs.service }}
-          DIGEST: ${{ needs.deploy.outputs.digest }}
+          # From the event, not from job outputs: GitHub drops an output that contains a secret value,
+          # and a digest can contain a short one such as the SSH port by chance.
+          SERVICE: ${{ github.event.client_payload.service || inputs.service }}
+          DIGEST: ${{ github.event.client_payload.digest || inputs.digest }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
@@ -167,6 +166,8 @@ jobs:
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           set -Eeuo pipefail
+          [[ "${SERVICE}" =~ ^(backend|frontend)$ ]] || { echo "::error::Unknown service."; exit 1; }
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::Digest has an invalid format."; exit 1; }
           BRANCH="pin/${SERVICE}"
           # Deleting the branch closes an older pin PR that this deploy replaces
           git push --quiet origin --delete "${BRANCH}" 2> /dev/null || true
