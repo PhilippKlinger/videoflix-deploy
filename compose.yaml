@@ -55,6 +55,10 @@ services:
   web:
     <<: *backend
     command: ["web"]
+    # The VPS is shared with other stacks: a crafted upload must not take it down
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 256
     healthcheck:
       # Django only answers hosts from ALLOWED_HOSTS; /api/health/ is exempt from the HTTPS redirect
       test:
@@ -80,6 +84,10 @@ services:
     # Exactly one worker: ffmpeg conversions run one after another
     <<: *backend
     command: ["worker"]
+    # ffmpeg peaks here; an upload that hits the limit fails, the other stacks keep running
+    mem_limit: 6g
+    cpus: 3
+    pids_limit: 256
     depends_on:
       web:
         condition: service_healthy
@@ -99,6 +107,9 @@ services:
     # Deletes expired demo accounts and their videos every 10 minutes (login checks expiry as well)
     <<: *backend
     command: ["sh", "-c", "while true; do python manage.py delete_expired_demos; sleep 600; done"]
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 64
     depends_on:
       web:
         condition: service_healthy
