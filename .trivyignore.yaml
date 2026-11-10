@@ -1,0 +1,11 @@
+# Accepted risks for the pinned images, reviewed 2026-11-10.
+# Each entry expires: after that date the CI fails again and the finding has to be reviewed anew.
+# Remove an entry as soon as an image update ships the fix (Dependabot pull request).
+vulnerabilities:
+  - id: CVE-2025-68121
+    paths:
+      - usr/local/bin/gosu
+    statement: >-
+      Go stdlib (crypto/tls session resumption) in gosu of the official Postgres image. gosu only drops
+      privileges once at container start and opens no network or TLS connection.
+    expired_at: 2026-12-10
