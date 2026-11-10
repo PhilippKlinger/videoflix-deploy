@@ -1,0 +1,169 @@
+# Actions are pinned by commit SHA; the comment shows the readable version.
+# Checks the pinned production combination before it is merged: configuration, scripts,
+# a real start of the stack with its security properties, and a scan of every pinned image.
+# Deploys stay in deploy.yml; this workflow never touches the server.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Scheduled runs catch image vulnerabilities published after the last push.
+  schedule:
+    - cron: "29 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+  ACTIONLINT_IMAGE: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+  SHELLCHECK_IMAGE: koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
+  # Host from .env.example; Django answers only hosts from ALLOWED_HOSTS
+  APP_HOST: videoflix.philipp-klinger.com
+
+jobs:
+  validate:
+    name: Validate compose, scripts and workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The template must be complete: every required value is filled with a throwaway one.
+      - name: Create .env from the template
+        run: |
+          set -Eeuo pipefail
+          cp .env.example .env
+          sed -i "s|^SECRET_KEY=$|SECRET_KEY=$(openssl rand -hex 32)|; s|^DB_PASSWORD=$|DB_PASSWORD=$(openssl rand -hex 16)|" .env
+
+      # On the server vps-edge creates this network; here it is a stand-in.
+      - name: Create external network
+        run: docker network create edge
+
+      - name: Validate compose.yaml
+        run: docker compose config --quiet
+
+      - name: Lint shell scripts (shellcheck)
+        run: docker run --rm -v "${PWD}:/mnt" -w /mnt "${SHELLCHECK_IMAGE}" scripts/*.sh backup/*.sh
+
+      - name: Lint workflows (actionlint)
+        run: docker run --rm -v "${PWD}:/repo" -w /repo "${ACTIONLINT_IMAGE}" -color
+
+  smoke-test:
+    name: Start pinned stack and check security properties
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create .env from the template
+        run: |
+          set -Eeuo pipefail
+          cp .env.example .env
+          sed -i "s|^SECRET_KEY=$|SECRET_KEY=$(openssl rand -hex 32)|; s|^DB_PASSWORD=$|DB_PASSWORD=$(openssl rand -hex 16)|" .env
+
+      # Waits for every healthcheck: database, cache and web (including migrations)
+      - name: Start stack
+        run: |
+          docker network create edge
+          docker compose up -d --wait --wait-timeout 300
+
+      # Requests come from the network "edge", the same way Caddy reaches the stack.
+      - name: Web and frontend answer on the network edge
+        run: |
+          set -Eeuo pipefail
+          backend="$(docker compose config --images | grep videoflix-backend | head -1)"
+          docker run --rm --network edge --entrypoint python -e APP_HOST "${backend}" -c '
+          import os, urllib.request as r
+          host = os.environ["APP_HOST"]
+          health = r.urlopen(r.Request("http://videoflix-web:8000/api/health/", headers={"Host": host}), timeout=10).read().decode()
+          print("health:", health)
+          assert "\"ok\"" in health, "health endpoint does not report ok"
+          page = r.urlopen("http://videoflix-frontend:8080/", timeout=10).read().decode()
+          assert "<app-root" in page, "start page does not contain the app"
+          print("frontend: app shell served")
+          '
+
+      - name: No service publishes ports
+        run: |
+          set -Eeuo pipefail
+          published="$(docker compose ps --format '{{.Name}} {{.Ports}}' | grep -E -- '->' || true)"
+          if [ -n "${published}" ]; then
+            echo "::error::Published ports: ${published}"
+            exit 1
+          fi
+
+      # Only web and frontend may be reachable from the proxy; database and cache have no route outside.
+      - name: Networks are separated
+        run: |
+          set -Eeuo pipefail
+          networks() { docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' "$(docker compose ps -q "$1")"; }
+          for service in db redis worker demo-cleanup; do
+            echo "${service}: $(networks "${service}")"
+            test "$(networks "${service}")" = "videoflix_internal "
+          done
+          echo "mail-worker: $(networks mail-worker)"
+          test "$(networks mail-worker)" = "videoflix_internal videoflix_outbound "
+          test "$(docker network inspect videoflix_internal --format '{{.Internal}}')" = "true"
+
+      - name: Application containers run as non-root user
+        run: |
+          set -Eeuo pipefail
+          for service in web worker mail-worker demo-cleanup frontend; do
+            uid="$(docker compose exec -T "${service}" id -u)"
+            echo "${service}: uid=${uid}"
+            test "${uid}" != "0"
+          done
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down --volumes
+
+  image-scan:
+    name: Scan pinned images (Trivy)
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create .env from the template
+        run: |
+          set -Eeuo pipefail
+          cp .env.example .env
+          sed -i "s|^SECRET_KEY=$|SECRET_KEY=$(openssl rand -hex 32)|; s|^DB_PASSWORD=$|DB_PASSWORD=$(openssl rand -hex 16)|" .env
+
+      # Official Trivy image pinned by digest instead of a third-party action.
+      # Reports HIGH and CRITICAL, fails on critical findings that already have a fix.
+      - name: Scan images with Trivy
+        run: |
+          set -Eeuo pipefail
+          failed=0
+          for image in $(docker compose config --images | sort -u); do
+            echo "::group::${image}"
+            docker run --rm "${TRIVY_IMAGE}" image --no-progress --severity HIGH,CRITICAL --ignore-unfixed "${image}"
+            docker run --rm "${TRIVY_IMAGE}" image --no-progress --quiet --severity CRITICAL --ignore-unfixed --exit-code 1 "${image}" || failed=1
+            echo "::endgroup::"
+          done
+          exit "${failed}"
