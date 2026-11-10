@@ -1,5 +1,10 @@
 # videoflix-deploy
 
+[![CI](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/ci.yml)
+[![Security Checks](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/security.yml/badge.svg)](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/security.yml)
+[![CodeQL](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/codeql.yml/badge.svg)](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/PhilippKlinger/videoflix-deploy/badge)](https://scorecard.dev/viewer/?uri=github.com/PhilippKlinger/videoflix-deploy)
+
 Deployment configuration for [Videoflix](https://github.com/PhilippKlinger/videoflix-backend): the single place that defines which image versions run in production.
 
 The application repositories ([backend](https://github.com/PhilippKlinger/videoflix-backend), [frontend](https://github.com/PhilippKlinger/videoflix-frontend)) only build and push images to GHCR. This repository pins those images by digest and rolls them out to the VPS, so one commit equals one running combination.
@@ -11,6 +16,8 @@ The application repositories ([backend](https://github.com/PhilippKlinger/videof
 - `.env.example`: every variable with purpose and whether it is required
 - `.github/workflows/deploy.yml`, `scripts/`: deploy with smoke test and automatic rollback
 - `backup/`: backup and restore test scripts, systemd service and timer
+- `.github/workflows/ci.yml`: on every pull request: compose validation with the complete `.env.example`, shellcheck, actionlint, a real start of the pinned stack (health, app shell, no published ports, separated networks, non-root containers) and a Trivy scan of every pinned image
+- `.github/workflows/security.yml`, `codeql.yml`, `scorecard.yml`: gitleaks, zizmor, CodeQL for the workflows, OpenSSF Scorecard
 
 TLS and routing are handled by [vps-edge](https://github.com/PhilippKlinger/vps-edge).
 
