@@ -57,6 +57,8 @@ All services log to journald instead of `json-file`, because `json-file` can onl
 4. On failure the previous images and commit are restored and checked again; the run stays red
 5. On success a pull request pins the digest in `compose.yaml`; merging it records the state and does not deploy again
 
+**Pin pull requests and required checks:** `main` requires the CI checks, but a pull request opened with the `GITHUB_TOKEN` starts no workflows (GitHub prevents loops). Close and reopen the pin pull request once; the reopen starts the checks, then merge.
+
 Secrets of the Environment: `SSH_HOST`, `SSH_PORT`, `SSH_USER`, `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`. The server keeps its own `.env`.
 
 **Roll back by hand:** Actions → Deploy → Run workflow, choose the service and enter an earlier digest (the deploy summaries and the history of `compose.yaml` list them). Run this for one service at a time.
