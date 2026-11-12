@@ -16,6 +16,7 @@ The application repositories ([backend](https://github.com/PhilippKlinger/videof
 - `.env.example`: every variable with purpose and whether it is required
 - `.github/workflows/deploy.yml`, `scripts/`: deploy with smoke test and automatic rollback
 - `backup/`: backup and restore test scripts, systemd service and timer
+- `restore-test.json`: date and result of the last restore test
 - `.github/workflows/ci.yml`: on every pull request: compose validation with the complete `.env.example`, shellcheck, actionlint, a real start of the pinned stack (health, app shell, no published ports, separated networks, non-root containers) and a Trivy scan of every pinned image
 - `.github/workflows/security.yml`, `codeql.yml`, `scorecard.yml`: gitleaks, zizmor, CodeQL for the workflows, OpenSSF Scorecard
 
@@ -92,6 +93,14 @@ Restore test: restores into the separate database `videoflix_restore_test`, comp
 ```bash
 sudo -u deploy /srv/videoflix/backup/backup.sh --with-media
 sudo -u deploy /srv/videoflix/backup/restore-test.sh   # ends with "Restore test passed."
+```
+
+`restore-test.json` in the repository root records the date and result of the last restore test.
+
+To look into a dump without restoring it: the files belong to deploy, so the admin user reads them with `sudo cat`.
+
+```bash
+sudo cat /srv/backups/videoflix/db-<time>.dump | sudo -u deploy sh -c 'cd /srv/videoflix && docker compose exec -T db pg_restore --list' | grep -c "TABLE DATA"
 ```
 
 Real restore as user deploy, `sudo -iu deploy` (overwrites the live data, the site is down meanwhile):
