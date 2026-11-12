@@ -10,7 +10,7 @@ x-logging: &logging
 
 x-backend: &backend
   # Last digest that passed the deploy workflow; the server may be ahead via compose.override.yaml until the pin PR is merged.
-  image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:346d0a94572ee913c68f3a6b528aeb79d39175beb265489ac390fdcfa72c09de}
+  image: ${BACKEND_IMAGE:-ghcr.io/philippklinger/videoflix-backend@sha256:1667ed221ec50e6687347b65b7625d09a228f11ba40fa45de7a3796ca3087c72}
   env_file: [.env]
   volumes:
     - media:/app/media
