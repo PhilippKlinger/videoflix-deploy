@@ -59,6 +59,9 @@ services:
     mem_limit: 2g
     cpus: 2
     pids_limit: 256
+    ports:
+      # Admin only through an SSH tunnel; vps-edge returns 404 for /admin/. Never bind to 0.0.0.0: Docker bypasses ufw
+      - "127.0.0.1:8000:8000"
     healthcheck:
       # Django only answers hosts from ALLOWED_HOSTS; /api/health/ is exempt from the HTTPS redirect
       test:
