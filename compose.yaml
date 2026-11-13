@@ -116,7 +116,7 @@ services:
     networks: [internal]
 
   frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/philippklinger/videoflix-frontend@sha256:75b17ba57a3948488e5687aad2c49fa75b63f94d22bbef9fa51983339d5efd38}
+    image: ${FRONTEND_IMAGE:-ghcr.io/philippklinger/videoflix-frontend@sha256:e4dc3b2788738413d54afe8f5efec711d85e989d4d6bf81248c8542eb2eb3606}
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
