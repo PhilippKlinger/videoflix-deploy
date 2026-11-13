@@ -1,35 +1,37 @@
 # videoflix-deploy
 
+Deployment configuration for [Videoflix](https://github.com/PhilippKlinger/videoflix-backend): the single place that defines which image versions run in production.
+
 [![CI](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/ci.yml)
 [![Security Checks](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/security.yml/badge.svg)](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/security.yml)
 [![CodeQL](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/codeql.yml/badge.svg)](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/PhilippKlinger/videoflix-deploy/badge)](https://scorecard.dev/viewer/?uri=github.com/PhilippKlinger/videoflix-deploy)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Deployment configuration for [Videoflix](https://github.com/PhilippKlinger/videoflix-backend): the single place that defines which image versions run in production.
-
 The application repositories ([backend](https://github.com/PhilippKlinger/videoflix-backend), [frontend](https://github.com/PhilippKlinger/videoflix-frontend)) only build and push images to GHCR. This repository pins those images by digest and rolls them out to the VPS, so one commit equals one running combination.
+
+## Architecture
 
 ```mermaid
 flowchart LR
     browser([Browser]) -->|HTTPS| caddy["Caddy<br/>(vps-edge)"]
-    caddy -- "edge: app shell" --> frontend["frontend<br/>nginx, Angular app"]
-    caddy -- "edge: /api, /admin" --> web["web<br/>Django API"]
+    caddy -- "app shell" --> frontend["frontend<br/>nginx, Angular"]
+    caddy -- "/api, /admin" --> web["web<br/>Django API"]
     subgraph internal [network internal, no route outside]
         db[(Postgres)]
         redis[(Redis)]
         worker["worker<br/>RQ, ffmpeg"]
         mail["mail-worker<br/>RQ"]
-        cleanup[demo-cleanup]
     end
     web --> db
     web -- jobs --> redis
-    redis -- "conversion jobs" --> worker
-    redis -- "mail jobs" --> mail
+    redis --> worker
+    redis --> mail
     worker --> db
-    cleanup --> db
-    mail -- "outbound: SMTP" --> smtp([Mail provider])
+    mail -- SMTP --> smtp([Mail provider])
 ```
+
+Caddy reaches `frontend` and `web` over the shared network `edge`; only `mail-worker` has a route outside (network `outbound`).
 
 ## Contents
 
