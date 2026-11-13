@@ -4,10 +4,32 @@
 [![Security Checks](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/security.yml/badge.svg)](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/security.yml)
 [![CodeQL](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/codeql.yml/badge.svg)](https://github.com/PhilippKlinger/videoflix-deploy/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/PhilippKlinger/videoflix-deploy/badge)](https://scorecard.dev/viewer/?uri=github.com/PhilippKlinger/videoflix-deploy)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Deployment configuration for [Videoflix](https://github.com/PhilippKlinger/videoflix-backend): the single place that defines which image versions run in production.
 
 The application repositories ([backend](https://github.com/PhilippKlinger/videoflix-backend), [frontend](https://github.com/PhilippKlinger/videoflix-frontend)) only build and push images to GHCR. This repository pins those images by digest and rolls them out to the VPS, so one commit equals one running combination.
+
+```mermaid
+flowchart LR
+    browser([Browser]) -->|HTTPS| caddy["Caddy<br/>(vps-edge)"]
+    caddy -- "edge: app shell" --> frontend["frontend<br/>nginx, Angular app"]
+    caddy -- "edge: /api, /admin" --> web["web<br/>Django API"]
+    subgraph internal [network internal, no route outside]
+        db[(Postgres)]
+        redis[(Redis)]
+        worker["worker<br/>RQ, ffmpeg"]
+        mail["mail-worker<br/>RQ"]
+        cleanup[demo-cleanup]
+    end
+    web --> db
+    web -- jobs --> redis
+    redis -- "conversion jobs" --> worker
+    redis -- "mail jobs" --> mail
+    worker --> db
+    cleanup --> db
+    mail -- "outbound: SMTP" --> smtp([Mail provider])
+```
 
 ## Contents
 
@@ -17,32 +39,18 @@ The application repositories ([backend](https://github.com/PhilippKlinger/videof
 - `.github/workflows/deploy.yml`, `scripts/`: deploy with smoke test and automatic rollback
 - `backup/`: backup and restore test scripts, systemd service and timer
 - `restore-test.json`: date and result of the last restore test
-- `.github/workflows/ci.yml`: on every pull request: compose validation with the complete `.env.example`, shellcheck, actionlint, a real start of the pinned stack (health, app shell, no published ports, separated networks, non-root containers) and a Trivy scan of every pinned image
-- `.github/workflows/security.yml`, `codeql.yml`, `scorecard.yml`: gitleaks, zizmor, CodeQL for the workflows, OpenSSF Scorecard
+- `.github/workflows/ci.yml`, `security.yml`, `codeql.yml`, `scorecard.yml`: the checks below
 
 TLS and routing are handled by [vps-edge](https://github.com/PhilippKlinger/vps-edge).
 
-## First start on the server
+## What CI checks
 
-```bash
-cd /srv/videoflix
-cp .env.example .env && chmod 600 .env    # fill in the required values
-docker compose pull
-docker compose up -d
-docker compose ps                          # web healthy, frontend healthy
-docker compose exec web python manage.py createsuperuser
-```
+Every pull request to `main` must pass these checks before a merge, pin pull requests included:
 
-Sample catalog (folder with .mp4 files copied to `/srv/videoflix/import`):
-
-```bash
-docker compose cp import/. web:/tmp/import
-docker compose exec web python manage.py import_catalog /tmp/import
-# Containers drop all capabilities, so not even root may delete the copy;
-# recreating web discards it (the imported videos live in the media volume)
-docker compose up -d --force-recreate web
-docker compose logs -f worker              # conversions run one after another
-```
+- **Validate compose, scripts and workflows:** compose validation with the complete `.env.example`, shellcheck, actionlint
+- **Start pinned stack and check security properties:** a real start of the pinned stack (health, app shell, no published ports, separated networks, non-root containers)
+- **Scan pinned images (Trivy):** every pinned image, also weekly for vulnerabilities published later
+- **Security checks:** secret scan (gitleaks), workflow lint (zizmor), CodeQL for the workflows
 
 ## Logs
 
@@ -70,50 +78,13 @@ Secrets of the Environment: `SSH_HOST`, `SSH_PORT`, `SSH_USER`, `SSH_PRIVATE_KEY
 
 ## Backup and restore
 
-`backup/backup.sh` writes a Postgres dump every day and a media archive once a week (and on the first run), to `/srv/backups/videoflix`. Dumps are kept for 14 days, the last 2 media archives stay. `.env` is not part of the backup: keep its values in a password manager, a restore needs them.
+`backup/backup.sh` writes a Postgres dump every day and a media archive once a week (and on the first run), into a backup directory on the server outside the stack. Dumps are kept for 14 days, the last 2 media archives stay. `.env` is not part of the backup: keep its values in a password manager, a restore needs them.
 
-**The backups stay on the VPS.** They protect against bad deployments and deleted data, not against losing the server. Copy a dump to another machine from time to time:
+**The backups stay on the VPS.** They protect against bad deployments and deleted data, not against losing the server.
 
-```bash
-scp <admin>@<host>:/srv/backups/videoflix/db-<time>.dump .   # contains personal data, store it encrypted
-```
+A systemd timer from `backup/` runs the backup every night. Restore test: restores into the separate database `videoflix_restore_test`, compares the row counts with the live database, checks that the archive contains every file the database refers to, and drops the copy again. Live data stays untouched.
 
-Setup on the server (once, as admin user):
-
-```bash
-sudo install -d -m 2750 -o deploy -g "$USER" /srv/backups/videoflix
-sudo cp /srv/videoflix/backup/videoflix-backup.service /srv/videoflix/backup/videoflix-backup.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now videoflix-backup.timer
-systemctl list-timers videoflix-backup.timer     # next run
-```
-
-Restore test: restores into the separate database `videoflix_restore_test`, compares the row counts with the live database, checks that the archive contains every file the database refers to, and drops the copy again. Live data stays untouched.
-
-```bash
-sudo -u deploy /srv/videoflix/backup/backup.sh --with-media
-sudo -u deploy /srv/videoflix/backup/restore-test.sh   # ends with "Restore test passed."
-```
-
-`restore-test.json` in the repository root records the date and result of the last restore test.
-
-To look into a dump without restoring it: the files belong to deploy, so the admin user reads them with `sudo cat`.
-
-```bash
-sudo cat /srv/backups/videoflix/db-<time>.dump | sudo -u deploy sh -c 'cd /srv/videoflix && docker compose exec -T db pg_restore --list' | grep -c "TABLE DATA"
-```
-
-Real restore as user deploy, `sudo -iu deploy` (overwrites the live data, the site is down meanwhile):
-
-```bash
-cd /srv/videoflix
-docker compose stop web worker mail-worker demo-cleanup
-docker compose exec -T db sh -c 'dropdb -U "$POSTGRES_USER" "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
-docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' < /srv/backups/videoflix/db-<time>.dump
-docker compose run --rm -T --no-deps web tar -xf - -C /app/media < /srv/backups/videoflix/media-<time>.tar
-docker compose up -d
-docker compose ps                                # web healthy
-```
+`restore-test.json` in the repository root records the date and result of the last restore test. A real restore stops `web`, `worker`, `mail-worker` and `demo-cleanup`, replaces the database with `pg_restore` and unpacks the media archive into the media volume; the site is down meanwhile. The step-by-step commands are kept in the private operator runbook.
 
 ## Troubleshooting
 
@@ -188,3 +159,18 @@ Sorted by what the monitors report (Videoflix · Web-App, Videoflix · API). Com
 **Fix:** deploy the current digest by hand, or delete `compose.override.yaml` and run `docker compose up -d` (see *Without the workflow* above).
 
 **Way back:** none needed.
+
+## Related repositories
+
+| Repository | Role |
+|---|---|
+| [videoflix-backend](https://github.com/PhilippKlinger/videoflix-backend) | Builds and publishes the backend image (`web`, `worker`, `mail-worker`, `demo-cleanup`) |
+| [videoflix-frontend](https://github.com/PhilippKlinger/videoflix-frontend) | Builds and publishes the frontend image (nginx) |
+| [vps-edge](https://github.com/PhilippKlinger/vps-edge) | Caddy with TLS in front of the stack, network `edge` |
+| [vps-monitoring](https://github.com/PhilippKlinger/vps-monitoring) | Uptime Kuma checks the web app and the API |
+| [vps-incident-assistant](https://github.com/PhilippKlinger/vps-incident-assistant) | Turns alerts into issues and uses the Troubleshooting section below as runbook |
+| [v-server-setup](https://github.com/PhilippKlinger/v-server-setup) | How the server is set up and hardened |
+
+## License
+
+[MIT](LICENSE)
