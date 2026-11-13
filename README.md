@@ -8,6 +8,15 @@ Deployment configuration for [Videoflix](https://github.com/PhilippKlinger/video
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/PhilippKlinger/videoflix-deploy/badge)](https://scorecard.dev/viewer/?uri=github.com/PhilippKlinger/videoflix-deploy)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Tech stack](#tech-stack)
+- [CI and security](#ci-and-security)
+- [Related repositories](#related-repositories)
+- [License](#license)
+
 ## Overview
 
 - Pins the backend and frontend images by digest, so one commit equals one running combination
