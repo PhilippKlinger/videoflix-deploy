@@ -21,7 +21,7 @@ Deployment configuration for [Videoflix](https://github.com/PhilippKlinger/video
 
 - Pins the backend and frontend images by digest, so one commit equals one running combination
 - Deploys one image at a time with a smoke test from outside and an automatic rollback
-- Hardened Compose stack: no published ports, separated networks, non-root containers, dropped capabilities, healthchecks
+- Hardened Compose stack: no public ports (the admin only through an SSH tunnel), separated networks, non-root containers, dropped capabilities, healthchecks
 - Nightly database backup with a restore test; `restore-test.json` records the last result
 - Logs go to journald with a time limit of 14 days
 
@@ -31,7 +31,7 @@ Deployment configuration for [Videoflix](https://github.com/PhilippKlinger/video
 flowchart LR
     browser([Browser]) -->|HTTPS| caddy["Caddy<br/>(vps-edge)"]
     caddy -- "app shell" --> frontend["frontend<br/>nginx, Angular"]
-    caddy -- "/api, /admin" --> web["web<br/>Django API"]
+    caddy -- "/api" --> web["web<br/>Django API"]
     subgraph internal [network internal, no route outside]
         db[(Postgres)]
         redis[(Redis)]
@@ -58,7 +58,7 @@ Caddy reaches `frontend` and `web` over the shared network `edge`; only `mail-wo
 ## CI and security
 
 - **Validate compose, scripts and workflows:** compose validation with the complete `.env.example`, shellcheck, actionlint
-- **Start pinned stack and check security properties:** health, app shell, no published ports, separated networks, non-root containers
+- **Start pinned stack and check security properties:** health, app shell, no public ports, separated networks, non-root containers
 - **Scan pinned images (Trivy):** every pinned image, also weekly for vulnerabilities published later
 - **Security checks:** secret scan (gitleaks), workflow lint (zizmor), CodeQL for the workflows
 

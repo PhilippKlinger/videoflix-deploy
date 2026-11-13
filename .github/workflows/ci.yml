@@ -98,10 +98,12 @@ jobs:
           print("frontend: app shell served")
           '
 
-      - name: No service publishes ports
+      # Only the admin tunnel port of web, on loopback; nothing reachable from outside.
+      - name: No service publishes ports outside loopback
         run: |
           set -Eeuo pipefail
-          published="$(docker compose ps --format '{{.Name}} {{.Ports}}' | grep -E -- '->' || true)"
+          docker compose ps --format '{{.Name}} {{.Ports}}'
+          published="$(docker compose ps --format '{{.Name}} {{.Ports}}' | grep -E -- '->' | grep -v -E '^videoflix-web-1 127\.0\.0\.1:8000->8000/tcp$' || true)"
           if [ -n "${published}" ]; then
             echo "::error::Published ports: ${published}"
             exit 1
